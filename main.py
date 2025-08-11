@@ -25,13 +25,6 @@ import logging
 import aiohttp
 import requests
 
-CHANNEL_ID = 1313976291044622417
-ALLOWED_ROLE_IDS = {
-    1300167248916254875, 1300167248899473557, 1377813941052248184,
-    1404300747864150148, 1300167248899473553, 1304921940972277813,
-    1304921761124454433, 1300167248899473552
-}
-
 
 # Set up logging for debugging
 logging.basicConfig(level=logging.DEBUG)
@@ -1634,6 +1627,14 @@ async def remove_extension_command(interaction: discord.Interaction, member: dis
         await interaction.response.send_message(f"{member.mention} is not on the extension list.", ephemeral=True)
 
 
+
+CHANNEL_ID = 1313976291044622417
+ALLOWED_ROLE_IDS = {
+    1300167248916254875, 1300167248899473557, 1377813941052248184,
+    1404300747864150148, 1300167248899473553, 1304921940972277813,
+    1304921761124454433, 1300167248899473552
+}
+
 # ==== TIME PARSER ====
 def parse_time(time_str: str) -> datetime:
     formats = ["%I:%M %p", "%H:%M", "%I %p", "%H"]  # Accepts 12hr and 24hr
@@ -1765,6 +1766,7 @@ async def logshift(interaction: discord.Interaction):
     await interaction.response.send_modal(ShiftForm())
 TOKEN = os.getenv("DISCORD_TOKEN")
 client.run(TOKEN)
+
 
 
 
