@@ -1637,7 +1637,7 @@ ALLOWED_ROLE_IDS = {
 
 # ==== TIME PARSER ====
 def parse_time(time_str: str) -> datetime:
-    formats = ["%I:%M %p", "%H:%M", "%I %p", "%H"]  # Accepts 12hr and 24hr
+    formats = ["%I:%M %p", "%H:%M", "%I %p", "%H"]
     for fmt in formats:
         try:
             return datetime.strptime(time_str.strip().upper(), fmt)
@@ -1749,9 +1749,22 @@ class ApprovalView(discord.ui.View):
         embed = interaction.message.embeds[0]
         embed.color = discord.Color.green()
         embed.set_footer(text=f"Approved by {interaction.user.display_name} ({interaction.user.id})")
-
         await interaction.message.edit(embed=embed, view=None)
         await interaction.response.send_message("Shift approved!", ephemeral=True)
+
+        submitter = interaction.guild.get_member(self.submitter_id)
+        if submitter:
+            try:
+                dm_embed = discord.Embed(
+                    title="✅ Shift Approved",
+                    color=discord.Color.green()
+                )
+                for field in embed.fields:
+                    dm_embed.add_field(name=field.name, value=field.value, inline=field.inline)
+                dm_embed.set_footer(text=f"Approved by {interaction.user.display_name}")
+                await submitter.send(embed=dm_embed)
+            except discord.Forbidden:
+                pass
 
     @discord.ui.button(label="Denied", style=discord.ButtonStyle.red)
     async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1763,9 +1776,23 @@ class ApprovalView(discord.ui.View):
         embed = interaction.message.embeds[0]
         embed.color = discord.Color.red()
         embed.set_footer(text=f"Denied by {interaction.user.display_name} ({interaction.user.id})")
-
         await interaction.message.edit(embed=embed, view=None)
         await interaction.response.send_message("Shift denied!", ephemeral=True)
+
+        submitter = interaction.guild.get_member(self.submitter_id)
+        if submitter:
+            try:
+                dm_embed = discord.Embed(
+                    title="❌ Shift Denied",
+                    color=discord.Color.red()
+                )
+                for field in embed.fields:
+                    dm_embed.add_field(name=field.name, value=field.value, inline=field.inline)
+                dm_embed.set_footer(text=f"Denied by {interaction.user.display_name}")
+                await submitter.send(embed=dm_embed)
+            except discord.Forbidden:
+                pass
+
 
 
 
@@ -1775,6 +1802,7 @@ async def logshift(interaction: discord.Interaction):
     await interaction.response.send_modal(ShiftForm())
 TOKEN = os.getenv("DISCORD_TOKEN")
 client.run(TOKEN)
+
 
 
 
