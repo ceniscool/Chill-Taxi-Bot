@@ -1637,3 +1637,7 @@ async def remove_extension_command(interaction: discord.Interaction, member: dis
         )
     else:
         await interaction.response.send_message(f"{member.mention} is not on the extension list.", ephemeral=True)
+
+TOKEN = os.getenv("DISCORD_TOKEN")
+client.run(TOKEN)
+
