@@ -1628,7 +1628,7 @@ async def remove_extension_command(interaction: discord.Interaction, member: dis
 
 
 
-CHANNEL_ID = 1313976291044622417
+CHANNEL_ID = 1308221445519966288
 ALLOWED_ROLE_IDS = {
     1300167248916254875, 1300167248899473557, 1377813941052248184,
     1404300747864150148, 1300167248899473553, 1304921940972277813,
@@ -1746,7 +1746,11 @@ class ApprovalView(discord.ui.View):
         if interaction.user.id == self.submitter_id:
             return await interaction.response.send_message("❌ You can't approve your own shift.", ephemeral=True)
 
-        await interaction.message.edit(content="✅ Approved", view=None)
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.green()
+        embed.set_footer(text=f"Approved by {interaction.user.display_name} ({interaction.user.id})")
+
+        await interaction.message.edit(embed=embed, view=None)
         await interaction.response.send_message("Shift approved!", ephemeral=True)
 
     @discord.ui.button(label="Denied", style=discord.ButtonStyle.red)
@@ -1756,8 +1760,13 @@ class ApprovalView(discord.ui.View):
         if interaction.user.id == self.submitter_id:
             return await interaction.response.send_message("❌ You can't deny your own shift.", ephemeral=True)
 
-        await interaction.message.edit(content="❌ Denied", view=None)
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.red()
+        embed.set_footer(text=f"Denied by {interaction.user.display_name} ({interaction.user.id})")
+
+        await interaction.message.edit(embed=embed, view=None)
         await interaction.response.send_message("Shift denied!", ephemeral=True)
+
 
 
 # ==== SLASH COMMAND ====
@@ -1766,6 +1775,7 @@ async def logshift(interaction: discord.Interaction):
     await interaction.response.send_modal(ShiftForm())
 TOKEN = os.getenv("DISCORD_TOKEN")
 client.run(TOKEN)
+
 
 
 
