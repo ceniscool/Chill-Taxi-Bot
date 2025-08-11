@@ -25,6 +25,14 @@ import logging
 import aiohttp
 import requests
 
+CHANNEL_ID = 1313976291044622417
+ALLOWED_ROLE_IDS = {
+    1300167248916254875, 1300167248899473557, 1377813941052248184,
+    1404300747864150148, 1300167248899473553, 1304921940972277813,
+    1304921761124454433, 1300167248899473552
+}
+
+
 # Set up logging for debugging
 logging.basicConfig(level=logging.DEBUG)
 
@@ -1625,7 +1633,145 @@ async def remove_extension_command(interaction: discord.Interaction, member: dis
     else:
         await interaction.response.send_message(f"{member.mention} is not on the extension list.", ephemeral=True)
 
+
+
+# ==== FORM (MODAL) ====
+class ShiftForm(discord.ui.Modal, title="Shift Logging Form"):
+    start_time = discord.ui.TextInput(
+        label="START TIME (12/24hr format)",
+        placeholder="e.g. 9:30 AM or 14:00",
+        style=discord.TextStyle.short
+    )
+    end_time = discord.ui.TextInput(
+        label="END TIME (12/24hr format)",
+        placeholder="e.g. 1:45 PM or 13:45",
+        style=discord.TextStyle.short
+    )
+    proof_link = discord.ui.TextInput(
+        label="Proof Link",
+        placeholder="Paste a valid link",
+        style=discord.TextStyle.short
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            # Parse start time
+            start_dt = parse_time(str(self.start_time))
+            end_dt = parse_time(str(self.end_time))
+
+            if end_dt < start_dt:
+                end_dt += timedelta(days=1)  # Handle overnight shifts
+
+            duration_minutes = (end_dt - start_dt).seconds / 60
+            payment = int((duration_minutes / 20) * 500)
+
+            embed = discord.Embed(
+                title="Shift Confirmation",
+                color=discord.Color.yellow()
+            )
+            embed.add_field(name="Time Worked", value=f"{int(duration_minutes)} minutes", inline=False)
+            embed.add_field(name="Proof Link", value=str(self.proof_link), inline=False)
+            embed.add_field(name="Payment", value=f"${payment}", inline=False)
+
+            await interaction.response.send_message(
+                embed=embed,
+                view=ConfirmView(
+                    user_id=interaction.user.id,
+                    duration_minutes=duration_minutes,
+                    payment=payment,
+                    proof_link=str(self.proof_link)
+                ),
+                ephemeral=True
+            )
+
+        except Exception as e:
+            await interaction.response.send_message(
+                f"❌ Error: {e}", ephemeral=True
+            )
+
+
+# ==== TIME PARSER ====
+def parse_time(time_str: str) -> datetime:
+    formats = ["%I:%M %p", "%H:%M", "%I %p", "%H"]  # Accept multiple formats
+    for fmt in formats:
+        try:
+            return datetime.strptime(time_str.strip().upper(), fmt)
+        except ValueError:
+            continue
+    raise ValueError("Invalid time format. Use 12hr (e.g. 2:30 PM) or 24hr (e.g. 14:30).")
+
+
+# ==== CONFIRM VIEW ====
+class ConfirmView(discord.ui.View):
+    def __init__(self, user_id, duration_minutes, payment, proof_link):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        self.duration_minutes = duration_minutes
+        self.payment = payment
+        self.proof_link = proof_link
+
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.green)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ This is not your submission!", ephemeral=True)
+
+        channel = client.get_channel(CHANNEL_ID)
+        if not channel:
+            return await interaction.response.send_message("❌ Log channel not found.", ephemeral=True)
+
+        embed = discord.Embed(
+            title="Shift Submission",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="User", value=interaction.user.mention, inline=False)
+        embed.add_field(name="Time Worked", value=f"{int(self.duration_minutes)} minutes", inline=False)
+        embed.add_field(name="Proof Link", value=self.proof_link, inline=False)
+        embed.add_field(name="Payment", value=f"${self.payment}", inline=False)
+
+        await channel.send(embed=embed, view=ApprovalView(submitter_id=self.user_id))
+        await interaction.response.send_message("✅ Shift log submitted!", ephemeral=True)
+
+    @discord.ui.button(label="Denied", style=discord.ButtonStyle.red)
+    async def denied(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ This is not your submission!", ephemeral=True)
+        await interaction.response.send_message("❌ Submission cancelled.", ephemeral=True)
+
+
+# ==== APPROVAL VIEW ====
+class ApprovalView(discord.ui.View):
+    def __init__(self, submitter_id):
+        super().__init__(timeout=None)
+        self.submitter_id = submitter_id
+
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.green)
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not any(role.id in ALLOWED_ROLE_IDS for role in interaction.user.roles):
+            return await interaction.response.send_message("❌ You don't have permission to approve.", ephemeral=True)
+        if interaction.user.id == self.submitter_id:
+            return await interaction.response.send_message("❌ You can't approve your own shift.", ephemeral=True)
+
+        await interaction.message.edit(content="✅ Approved", view=None)
+        await interaction.response.send_message("Shift approved!", ephemeral=True)
+
+    @discord.ui.button(label="Denied", style=discord.ButtonStyle.red)
+    async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not any(role.id in ALLOWED_ROLE_IDS for role in interaction.user.roles):
+            return await interaction.response.send_message("❌ You don't have permission to deny.", ephemeral=True)
+        if interaction.user.id == self.submitter_id:
+            return await interaction.response.send_message("❌ You can't deny your own shift.", ephemeral=True)
+
+        await interaction.message.edit(content="❌ Denied", view=None)
+        await interaction.response.send_message("Shift denied!", ephemeral=True)
+
+
+# ==== SLASH COMMAND ====
+@client.tree.command(name="logshift", description="Log your shift via a form.")
+async def logshift(interaction: discord.Interaction):
+    await interaction.response.send_modal(ShiftForm())
+
 TOKEN = os.getenv("DISCORD_TOKEN")
 client.run(TOKEN)
+
 
 
