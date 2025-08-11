@@ -1634,6 +1634,16 @@ async def remove_extension_command(interaction: discord.Interaction, member: dis
         await interaction.response.send_message(f"{member.mention} is not on the extension list.", ephemeral=True)
 
 
+# ==== TIME PARSER ====
+def parse_time(time_str: str) -> datetime:
+    formats = ["%I:%M %p", "%H:%M", "%I %p", "%H"]  # Accepts 12hr and 24hr
+    for fmt in formats:
+        try:
+            return datetime.strptime(time_str.strip().upper(), fmt)
+        except ValueError:
+            continue
+    raise ValueError("Invalid time format. Use 12hr (e.g. 2:30 PM) or 24hr (e.g. 14:30).")
+
 
 # ==== FORM (MODAL) ====
 class ShiftForm(discord.ui.Modal, title="Shift Logging Form"):
@@ -1655,12 +1665,11 @@ class ShiftForm(discord.ui.Modal, title="Shift Logging Form"):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            # Parse start time
             start_dt = parse_time(str(self.start_time))
             end_dt = parse_time(str(self.end_time))
 
             if end_dt < start_dt:
-                end_dt += timedelta(days=1)  # Handle overnight shifts
+                end_dt += timedelta(days=1)  # Overnight shift fix
 
             duration_minutes = (end_dt - start_dt).seconds / 60
             payment = int((duration_minutes / 20) * 500)
@@ -1685,20 +1694,7 @@ class ShiftForm(discord.ui.Modal, title="Shift Logging Form"):
             )
 
         except Exception as e:
-            await interaction.response.send_message(
-                f"❌ Error: {e}", ephemeral=True
-            )
-
-
-# ==== TIME PARSER ====
-def parse_time(time_str: str) -> datetime:
-    formats = ["%I:%M %p", "%H:%M", "%I %p", "%H"]  # Accept multiple formats
-    for fmt in formats:
-        try:
-            return datetime.strptime(time_str.strip().upper(), fmt)
-        except ValueError:
-            continue
-    raise ValueError("Invalid time format. Use 12hr (e.g. 2:30 PM) or 24hr (e.g. 14:30).")
+            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
 
 
 # ==== CONFIRM VIEW ====
@@ -1715,9 +1711,7 @@ class ConfirmView(discord.ui.View):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("❌ This is not your submission!", ephemeral=True)
 
-        channel = client.get_channel(CHANNEL_ID)
-        if not channel:
-            return await interaction.response.send_message("❌ Log channel not found.", ephemeral=True)
+        channel = await client.fetch_channel(CHANNEL_ID)
 
         embed = discord.Embed(
             title="Shift Submission",
@@ -1769,9 +1763,9 @@ class ApprovalView(discord.ui.View):
 @client.tree.command(name="logshift", description="Log your shift via a form.")
 async def logshift(interaction: discord.Interaction):
     await interaction.response.send_modal(ShiftForm())
-
 TOKEN = os.getenv("DISCORD_TOKEN")
 client.run(TOKEN)
+
 
 
 
