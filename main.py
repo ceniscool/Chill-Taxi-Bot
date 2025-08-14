@@ -1826,13 +1826,16 @@ async def pay_shifts(interaction: discord.Interaction):
     await interaction.response.send_message("Pending payments:", view=view, ephemeral=True)
 
 
+@client.event
+async def on_ready():
+    await client.tree.sync()  # Sync all commands globally
+    print(f"Logged in as {client.user}. Global commands synced.")
 
+# ----------------------------
+# RUN BOT
+# ----------------------------
 TOKEN = os.getenv("DISCORD_TOKEN")
 client.run(TOKEN)
-
-
-
-
 
 
 
