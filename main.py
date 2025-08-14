@@ -1723,9 +1723,11 @@ class ApprovalButtons(discord.ui.View):
         if interaction.user.id == self.user_id:
             return await interaction.response.send_message("❌ You can't approve your own shift.", ephemeral=True)
 
-        # Save to JSON
+        # Unique key for JSON
+        unique_key = f"{self.user_id}-{datetime.now().timestamp()}"
+
         log_data = load_json(LOG_SHIFT_FILE)
-        log_data[str(interaction.user.id) + str(datetime.now().timestamp())] = {
+        log_data[unique_key] = {
             "User": str(interaction.user),
             "Start": self.start_time,
             "End": self.end_time,
@@ -1736,7 +1738,7 @@ class ApprovalButtons(discord.ui.View):
         save_json(LOG_SHIFT_FILE, log_data)
 
         payment_data = load_json(PAYMENT_FILE)
-        payment_data[str(interaction.user.id) + str(datetime.now().timestamp())] = {
+        payment_data[unique_key] = {
             "User": str(interaction.user),
             "Payment": self.payment_amount
         }
@@ -1753,13 +1755,17 @@ class ApprovalButtons(discord.ui.View):
         await interaction.response.send_message("❌ Shift denied.", ephemeral=True)
 
 # ----------------------------
-# SLASH COMMANDS
+# GUILD-SPECIFIC SLASH COMMANDS
 # ----------------------------
+
+
 @client.tree.command(name="log_shift", description="Submit your shift")
+@app_commands.guilds(guild)
 async def log_shift(interaction: discord.Interaction):
     await interaction.response.send_modal(ShiftForm())
 
 @client.tree.command(name="pay_shifts", description="Mark shifts as paid")
+@app_commands.guilds(guild)
 async def pay_shifts(interaction: discord.Interaction):
     if not any(role.id in ALLOWED_PAYMENT_ROLES for role in interaction.user.roles):
         await interaction.response.send_message("❌ You don't have permission.", ephemeral=True)
@@ -1771,7 +1777,6 @@ async def pay_shifts(interaction: discord.Interaction):
         await interaction.response.send_message("No shifts pending payment.", ephemeral=True)
         return
 
-    # Send buttons for each unpaid shift
     view = discord.ui.View()
     for key, value in payment_data.items():
         button = discord.ui.Button(label=f"Paid: {value['User']}", style=discord.ButtonStyle.green)
@@ -1790,6 +1795,7 @@ async def pay_shifts(interaction: discord.Interaction):
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 client.run(TOKEN)
+
 
 
 
