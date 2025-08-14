@@ -52,6 +52,11 @@ start_time = time.time()
 @client.event
 async def on_ready():
     logging.info(f'Logged in as {client.user}')
+
+@client.event
+async def on_ready():
+    await client.tree.sync()  # Global slash command sync
+    print(f"Logged in as {client.user}. Commands synced.")
     
     # Log the syncing process
     try:
@@ -1825,20 +1830,12 @@ async def pay_shifts(interaction: discord.Interaction):
 
     await interaction.response.send_message("Pending payments:", view=view, ephemeral=True)
 
-
-# ----------------------------
-# ON READY EVENT
-# ----------------------------
-@client.event
-async def on_ready():
-    await client.tree.sync()  # Global slash command sync
-    print(f"Logged in as {client.user}. Commands synced.")
-
 # ----------------------------
 # RUN BOT
 # ----------------------------
 TOKEN = os.getenv("DISCORD_TOKEN")  # Token stored on Railway environment
 client.run(TOKEN)
+
 
 
 
