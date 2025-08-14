@@ -1673,8 +1673,6 @@ def parse_time(time_str: str) -> datetime:
     raise ValueError("Invalid time format. Use 12hr (e.g. 2:30 PM) or 24hr (e.g. 14:30).")
 
 # ----------------------------
-
-# ----------------------------
 # SHIFT MODAL
 # ----------------------------
 class ShiftForm(discord.ui.Modal, title="Shift Logging Form"):
@@ -1699,18 +1697,23 @@ class ShiftForm(discord.ui.Modal, title="Shift Logging Form"):
             embed.add_field(name="Payment Amount", value=f"${payment_amount}")
             embed.add_field(name="Proof Link", value=str(self.proof_link))
 
-            await interaction.response.send_message(
-                embed=embed,
-                view=ApprovalButtons(
-                    submitter_id=interaction.user.id,
-                    start_time=str(self.start_time),
-                    end_time=str(self.end_time),
-                    payment_amount=payment_amount,
-                    proof_link=str(self.proof_link),
-                    submitter_name=str(interaction.user)
-                ),
-                ephemeral=True
+            view = ApprovalButtons(
+                submitter_id=interaction.user.id,
+                start_time=str(self.start_time),
+                end_time=str(self.end_time),
+                payment_amount=payment_amount,
+                proof_link=str(self.proof_link),
+                submitter_name=str(interaction.user)
             )
+
+            # Ephemeral response to the user
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+            # Send to approval channel
+            approval_channel = client.get_channel(1308221445519966288)  # replace with your channel ID
+            if approval_channel:
+                await approval_channel.send(embed=embed, view=view)
+
         except Exception as e:
             await interaction.response.send_message(f"Error: {e}", ephemeral=True)
 
@@ -1831,6 +1834,7 @@ async def pay_shifts(interaction: discord.Interaction):
 # ----------------------------
 TOKEN = os.getenv("DISCORD_TOKEN")  # Token stored on Railway environment
 client.run(TOKEN)
+
 
 
 
