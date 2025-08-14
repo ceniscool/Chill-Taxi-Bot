@@ -1627,7 +1627,6 @@ async def remove_extension_command(interaction: discord.Interaction, member: dis
         await interaction.response.send_message(f"{member.mention} is not on the extension list.", ephemeral=True)
 
 
-
 # ----------------------------
 # FILE PATHS
 # ----------------------------
@@ -1637,10 +1636,12 @@ PAYMENT_FILE = "payment_system.json"
 # ----------------------------
 # ALLOWED ROLES
 # ----------------------------
+ALLOWED_HR_ROLES = {1300167248916254875, 1300167248899473557, 1404300747864150148,
+                    1300167248899473553, 1300167248899473552}
 ALLOWED_PAYMENT_ROLES = {1300167248916254875, 1300167248899473557, 1404300747864150148}
 
 # ----------------------------
-# FILE LOAD/SAVE HELPERS
+# FILE HELPERS
 # ----------------------------
 def load_json(filename):
     if os.path.exists(filename):
@@ -1652,121 +1653,225 @@ def save_json(filename, data):
     with open(filename, "w") as f:
         json.dump(data, f, indent=4)
 
+# ----------------------------
+# TIME HELPERS
+# ----------------------------
+def parse_time(time_str: str) -> datetime:
+    formats = ["%I:%M %p", "%H:%M", "%I %p", "%H"]
+    for fmt in formats:
+        try:
+            return datetime.strptime(time_str.strip().upper(), fmt)
+        except ValueError:
+            continue
+    raise ValueError("Invalid time format. Use 12hr (e.g. 2:30 PM) or 24hr (e.g. 14:30).")
+
+def calculate_minutes(start_time: str, end_time: str):
+    start_dt = parse_time(start_time)
+    end_dt = parse_time(end_time)
+    if end_dt < start_dt:
+        end_dt += timedelta(days=1)
+    return (end_dt - start_dt).seconds // 60
+
+def calculate_payment(minutes: int):
+    return round((minutes / 15) * 500)
+
+# ----------------------------
+# BOT SETUP
+# ----------------------------
+intents = discord.Intents.default()
+intents.message_content = True
+client = commands.Bot(command_prefix="!", intents=intents)
+
+# ----------------------------
+# MODAL
+# ----------------------------
+class ShiftForm(discord.ui.Modal, title="Shift Logging Form"):
+    start_time = discord.ui.TextInput(label="Start Time (12/24hr)", placeholder="e.g. 9:30 AM or 14:00")
+    end_time = discord.ui.TextInput(label="End Time (12/24hr)", placeholder="e.g. 13:45 or 1:45 PM")
+    proof_link = discord.ui.TextInput(label="Proof Link", placeholder="Paste a valid link")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            minutes = calculate_minutes(str(self.start_time), str(self.end_time))
+            payment = calculate_payment(minutes)
+
+            embed = discord.Embed(title="Shift Submission", color=discord.Color.blue())
+            embed.add_field(name="User", value=interaction.user.mention, inline=False)
+            embed.add_field(name="Start Time", value=str(self.start_time), inline=True)
+            embed.add_field(name="End Time", value=str(self.end_time), inline=True)
+            embed.add_field(name="Minutes Worked", value=f"{minutes} min", inline=True)
+            embed.add_field(name="Payment", value=f"${payment}", inline=True)
+            embed.add_field(name="Proof Link", value=str(self.proof_link), inline=False)
+
+            # Save preliminary to payment system for stack
+            payment_data = load_json(PAYMENT_FILE)
+            payment_data[str(interaction.user)] = {
+                "Name": str(interaction.user),
+                "Start": str(self.start_time),
+                "End": str(self.end_time),
+                "Minutes": minutes,
+                "Payment": payment,
+                "Proof_Link": str(self.proof_link)
+            }
+            save_json(PAYMENT_FILE, payment_data)
+
+            await interaction.response.send_message(
+                embed=embed,
+                view=ShiftApprovalView(
+                    submitter_id=interaction.user.id,
+                    username=str(interaction.user),
+                    start_time=str(self.start_time),
+                    end_time=str(self.end_time),
+                    minutes=minutes,
+                    payment=payment,
+                    proof_link=str(self.proof_link)
+                ),
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
+# ----------------------------
 # SHIFT APPROVAL VIEW
 # ----------------------------
 class ShiftApprovalView(discord.ui.View):
-    def __init__(self, user_id, name, start_time, end_time, payment_amount):
+    def __init__(self, submitter_id, username, start_time, end_time, minutes, payment, proof_link):
         super().__init__(timeout=None)
-        self.user_id = user_id
-        self.name = name
+        self.submitter_id = submitter_id
+        self.username = username
         self.start_time = start_time
         self.end_time = end_time
-        self.payment_amount = payment_amount
+        self.minutes = minutes
+        self.payment = payment
+        self.proof_link = proof_link
 
     @discord.ui.button(label="Approve", style=discord.ButtonStyle.success)
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not any(role.id in ALLOWED_HR_ROLES for role in interaction.user.roles):
+            return await interaction.response.send_message("❌ No permission.", ephemeral=True)
+        if interaction.user.id == self.submitter_id:
+            return await interaction.response.send_message("❌ Cannot approve your own shift.", ephemeral=True)
+
         # Save to log_shift_system.json
         log_data = load_json(LOG_SHIFT_FILE)
-        log_data[self.name] = {
-            "Name": self.name,
+        log_data[self.username] = {
+            "Name": self.username,
             "Start": self.start_time,
             "End": self.end_time,
-            "Payment": self.payment_amount,
+            "Minutes": self.minutes,
+            "Payment": self.payment,
             "Approved_By": str(interaction.user),
-            "Decision_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "Decision_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Proof_Link": self.proof_link
         }
         save_json(LOG_SHIFT_FILE, log_data)
 
-        # Save to payment_system.json
-        payment_data = load_json(PAYMENT_FILE)
-        payment_data[self.name] = {
-            "Name": self.name,
-            "Payment": self.payment_amount
-        }
-        save_json(PAYMENT_FILE, payment_data)
-
-        # DM employee
-        employee = await client.fetch_user(self.user_id)
-        await employee.send(f"✅ Your shift from **{self.start_time}** to **{self.end_time}** has been **approved**.\nPayment Amount: **${self.payment_amount}**.")
-
-        await interaction.response.send_message(f"Shift for **{self.name}** approved and logged.", ephemeral=True)
-
-    @discord.ui.button(label="Deny", style=discord.ButtonStyle.danger)
-    async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # DM employee
-        employee = await client.fetch_user(self.user_id)
-        await employee.send(f"❌ Your shift from **{self.start_time}** to **{self.end_time}** has been **denied**.")
-
-        await interaction.response.send_message(f"Shift for **{self.name}** denied.", ephemeral=True)
-
-# ----------------------------
-# SLASH COMMAND: LOG SHIFT
-# ----------------------------
-@client.tree.command(name="log_shift", description="Log a shift for approval")
-@app_commands.describe(name="Your name", start_time="Shift start time", end_time="Shift end time", payment_amount="Payment amount in dollars")
-async def log_shift(interaction: discord.Interaction, name: str, start_time: str, end_time: str, payment_amount: int):
-    embed = discord.Embed(title="Shift Approval Request", color=discord.Color.yellow())
-    embed.add_field(name="Name", value=name, inline=False)
-    embed.add_field(name="Start Time", value=start_time, inline=True)
-    embed.add_field(name="End Time", value=end_time, inline=True)
-    embed.add_field(name="Payment Amount", value=f"${payment_amount}", inline=True)
-    embed.set_footer(text=f"Requested by {interaction.user}")
-
-    view = ShiftApprovalView(interaction.user.id, name, start_time, end_time, payment_amount)
-    await interaction.response.send_message(embed=embed, view=view)
-
-# ----------------------------
-# SLASH COMMAND: PAY SHIFTS
-# ----------------------------
-@client.tree.command(name="pay_shifts", description="Mark a shift as paid and remove it from the system")
-@app_commands.describe(name="The name of the employee to mark as paid")
-async def pay_shifts(interaction: discord.Interaction, name: str):
-    # Role check
-    if not any(role.id in ALLOWED_PAYMENT_ROLES for role in interaction.user.roles):
-        await interaction.response.send_message("❌ You do not have permission to run this command.", ephemeral=True)
-        return
-
-    payment_data = load_json(PAYMENT_FILE)
-    log_data = load_json(LOG_SHIFT_FILE)
-
-    if name in payment_data:
-        # DM employee
+        # DM submitter
         try:
-            employee_id = None
-            # Search for matching ID in log data if available
-            for member in interaction.guild.members:
-                if member.name == name or member.display_name == name:
-                    employee_id = member.id
-                    break
-            if employee_id:
-                employee = await client.fetch_user(employee_id)
-                await employee.send(f"💰 Your shift payment of **${payment_data[name]['Payment']}** has been processed.")
+            submitter = await client.fetch_user(self.submitter_id)
+            await submitter.send(f"✅ Your shift from {self.start_time} to {self.end_time} has been approved by {interaction.user}. Payment: ${self.payment}")
         except:
             pass
 
-        # Remove from both files
-        payment_data.pop(name, None)
-        log_data.pop(name, None)
-        save_json(PAYMENT_FILE, payment_data)
-        save_json(LOG_SHIFT_FILE, log_data)
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.green()
+        embed.set_footer(text=f"Approved by {interaction.user}")
+        await interaction.message.edit(embed=embed, view=None)
+        await interaction.response.send_message("Shift approved!", ephemeral=True)
 
-        await interaction.response.send_message(f"✅ Shift for **{name}** marked as paid and removed from records.")
-    else:
-        await interaction.response.send_message(f"❌ No unpaid shift found for **{name}**.", ephemeral=True)
+    @discord.ui.button(label="Deny", style=discord.ButtonStyle.red)
+    async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not any(role.id in ALLOWED_HR_ROLES for role in interaction.user.roles):
+            return await interaction.response.send_message("❌ No permission.", ephemeral=True)
+        if interaction.user.id == self.submitter_id:
+            return await interaction.response.send_message("❌ Cannot deny your own shift.", ephemeral=True)
 
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.red()
+        embed.set_footer(text=f"Denied by {interaction.user}")
+        await interaction.message.edit(embed=embed, view=None)
 
+        try:
+            submitter = await client.fetch_user(self.submitter_id)
+            await submitter.send(f"❌ Your shift from {self.start_time} to {self.end_time} has been denied by {interaction.user}.")
+        except:
+            pass
 
-# ==== SLASH COMMAND ====
-@client.tree.command(name="logshift", description="Log your shift via a form.")
-async def logshift(interaction: discord.Interaction):
+# ----------------------------
+# PAYMENT VIEW
+# ----------------------------
+class PaymentView(discord.ui.View):
+    def __init__(self, username):
+        super().__init__(timeout=None)
+        self.username = username
+
+    @discord.ui.button(label="Mark Paid", style=discord.ButtonStyle.green)
+    async def mark_paid(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not any(role.id in ALLOWED_PAYMENT_ROLES for role in interaction.user.roles):
+            return await interaction.response.send_message("❌ No permission.", ephemeral=True)
+
+        log_data = load_json(LOG_SHIFT_FILE)
+        payment_data = load_json(PAYMENT_FILE)
+
+        if self.username in log_data:
+            # DM submitter
+            try:
+                submitter_name = log_data[self.username]["Name"]
+                submitter_id = None
+                for member in interaction.guild.members:
+                    if member.name == submitter_name or member.display_name == submitter_name:
+                        submitter_id = member.id
+                        break
+                if submitter_id:
+                    submitter = await client.fetch_user(submitter_id)
+                    await submitter.send(
+                        f"💰 Your shift from {log_data[self.username]['Start']} to {log_data[self.username]['End']} has been marked as PAID. Payment: ${log_data[self.username]['Payment']}"
+                    )
+            except:
+                pass
+
+            # Remove from both JSONs
+            log_data.pop(self.username, None)
+            payment_data.pop(self.username, None)
+            save_json(LOG_SHIFT_FILE, log_data)
+            save_json(PAYMENT_FILE, payment_data)
+
+            await interaction.message.delete()
+            await interaction.response.send_message(f"✅ {self.username}'s shift marked as paid.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Shift not found.", ephemeral=True)
+
+# ----------------------------
+# SLASH COMMANDS
+# ----------------------------
+@client.tree.command(name="log_shift", description="Log a new shift")
+async def slash_log_shift(interaction: discord.Interaction):
     await interaction.response.send_modal(ShiftForm())
-TOKEN = os.getenv("DISCORD_TOKEN")
-client.run(TOKEN)
 
+@client.tree.command(name="payment_system", description="Manage approved shifts and mark payments")
+async def payment_system(interaction: discord.Interaction):
+    if not any(role.id in ALLOWED_PAYMENT_ROLES for role in interaction.user.roles):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True)
+        return
 
+    log_data = load_json(LOG_SHIFT_FILE)
+    if not log_data:
+        await interaction.response.send_message("✅ No approved shifts to pay.", ephemeral=True)
+        return
 
+    for username, info in log_data.items():
+        embed = discord.Embed(title=f"Shift Payment: {username}", color=discord.Color.blue())
+        embed.add_field(name="Start", value=info["Start"], inline=True)
+        embed.add_field(name="End", value=info["End"], inline=True)
+        embed.add_field(name="Minutes Worked", value=f"{info['Minutes']} min", inline=True)
+        embed.add_field(name="Payment", value=f"${info['Payment']}", inline=True)
+        embed.add_field(name="Approved By", value=info["Approved_By"], inline=True)
+        embed.add_field(name="Proof Link", value=info["Proof_Link"], inline=False)
+        await interaction.channel.send(embed=embed, view=PaymentView(username))
 
+    await interaction.response.send_message("✅ Shifts loaded for payment processing.", ephemeral=True)
 
+# ----------------------------
 
 
 
