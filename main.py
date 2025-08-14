@@ -1874,5 +1874,6 @@ async def payment_system(interaction: discord.Interaction):
 # ----------------------------
 
 
+client.run(os.environ["DISCORD_TOKEN"])
 
 
