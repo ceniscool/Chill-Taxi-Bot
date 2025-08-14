@@ -52,7 +52,6 @@ start_time = time.time()
 @client.event
 async def on_ready():
     logging.info(f'Logged in as {client.user}')
-
     
     # Log the syncing process
     try:
@@ -1627,42 +1626,16 @@ async def remove_extension_command(interaction: discord.Interaction, member: dis
     else:
         await interaction.response.send_message(f"{member.mention} is not on the extension list.", ephemeral=True)
 
-# ----------------------------
-# FILE PATHS
-# ----------------------------
-LOG_SHIFT_FILE = "log_shift_system.json"
-PAYMENT_FILE = "payment_system.json"
 
-# ----------------------------
-# ROLE CONFIGS
-# ----------------------------
-ALLOWED_APPROVAL_ROLES = {
-    1300167248916254875,
-    1300167248899473557,
-    1404300747864150148,
-    1300167248899473553,
-    1300167248899473552
+
+CHANNEL_ID = 1308221445519966288
+ALLOWED_ROLE_IDS = {
+    1300167248916254875, 1300167248899473557, 1377813941052248184,
+    1404300747864150148, 1300167248899473553, 1304921940972277813,
+    1304921761124454433, 1300167248899473552
 }
 
-ALLOWED_PAYMENT_ROLES = {
-    1300167248916254875,
-    1300167248899473557,
-    1404300747864150148
-}
-
-# ----------------------------
-# HELPERS
-# ----------------------------
-def load_json(filename):
-    if os.path.exists(filename):
-        with open(filename, "r") as f:
-            return json.load(f)
-    return {}
-
-def save_json(filename, data):
-    with open(filename, "w") as f:
-        json.dump(data, f, indent=4)
-
+# ==== TIME PARSER ====
 def parse_time(time_str: str) -> datetime:
     formats = ["%I:%M %p", "%H:%M", "%I %p", "%H"]
     for fmt in formats:
@@ -1672,167 +1645,163 @@ def parse_time(time_str: str) -> datetime:
             continue
     raise ValueError("Invalid time format. Use 12hr (e.g. 2:30 PM) or 24hr (e.g. 14:30).")
 
-# ----------------------------
-# SHIFT MODAL
-# ----------------------------
+
+# ==== FORM (MODAL) ====
 class ShiftForm(discord.ui.Modal, title="Shift Logging Form"):
-    start_time = discord.ui.TextInput(label="Start Time", placeholder="9:00 AM or 14:00")
-    end_time = discord.ui.TextInput(label="End Time", placeholder="11:30 AM or 23:30")
-    proof_link = discord.ui.TextInput(label="Proof Link", placeholder="Paste a valid link")
+    start_time = discord.ui.TextInput(
+        label="START TIME (12/24hr format)",
+        placeholder="e.g. 9:30 AM or 14:00",
+        style=discord.TextStyle.short
+    )
+    end_time = discord.ui.TextInput(
+        label="END TIME (12/24hr format)",
+        placeholder="e.g. 1:45 PM or 13:45",
+        style=discord.TextStyle.short
+    )
+    proof_link = discord.ui.TextInput(
+        label="Proof Link",
+        placeholder="Paste a valid link",
+        style=discord.TextStyle.short
+    )
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
             start_dt = parse_time(str(self.start_time))
             end_dt = parse_time(str(self.end_time))
+
             if end_dt < start_dt:
-                end_dt += timedelta(days=1)
+                end_dt += timedelta(days=1)  # Overnight shift fix
 
             duration_minutes = (end_dt - start_dt).seconds / 60
-            payment_amount = int((duration_minutes / 15) * 500)
+            payment = int((duration_minutes / 20) * 500)
 
-            embed = discord.Embed(title="Shift Submission", color=discord.Color.yellow())
-            embed.add_field(name="User", value=interaction.user.mention)
-            embed.add_field(name="Start Time", value=str(self.start_time))
-            embed.add_field(name="End Time", value=str(self.end_time))
-            embed.add_field(name="Payment Amount", value=f"${payment_amount}")
-            embed.add_field(name="Proof Link", value=str(self.proof_link))
+            embed = discord.Embed(
+                title="Shift Confirmation",
+                color=discord.Color.yellow()
+            )
+            embed.add_field(name="Time Worked", value=f"{int(duration_minutes)} minutes", inline=False)
+            embed.add_field(name="Proof Link", value=str(self.proof_link), inline=False)
+            embed.add_field(name="Payment", value=f"${payment}", inline=False)
 
-            view = ApprovalButtons(
-                submitter_id=interaction.user.id,
-                start_time=str(self.start_time),
-                end_time=str(self.end_time),
-                payment_amount=payment_amount,
-                proof_link=str(self.proof_link),
-                submitter_name=str(interaction.user)
+            await interaction.response.send_message(
+                embed=embed,
+                view=ConfirmView(
+                    user_id=interaction.user.id,
+                    duration_minutes=duration_minutes,
+                    payment=payment,
+                    proof_link=str(self.proof_link)
+                ),
+                ephemeral=True
             )
 
-            # Send to approval channel
-            approval_channel = client.get_channel(1308221445519966288)  # replace with your channel ID
-            if approval_channel:
-                await approval_channel.send(embed=embed, view=view)
-
         except Exception as e:
-            await interaction.response.send_message(f"Error: {e}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
 
-# ----------------------------
-# APPROVAL BUTTONS
-# ----------------------------
-class ApprovalButtons(discord.ui.View):
-    def __init__(self, submitter_id, start_time, end_time, payment_amount, proof_link, submitter_name):
+
+# ==== CONFIRM VIEW ====
+class ConfirmView(discord.ui.View):
+    def __init__(self, user_id, duration_minutes, payment, proof_link):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        self.duration_minutes = duration_minutes
+        self.payment = payment
+        self.proof_link = proof_link
+
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.green)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ This is not your submission!", ephemeral=True)
+
+        channel = await client.fetch_channel(CHANNEL_ID)
+
+        embed = discord.Embed(
+            title="Shift Submission",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="User", value=interaction.user.mention, inline=False)
+        embed.add_field(name="Time Worked", value=f"{int(self.duration_minutes)} minutes", inline=False)
+        embed.add_field(name="Proof Link", value=self.proof_link, inline=False)
+        embed.add_field(name="Payment", value=f"${self.payment}", inline=False)
+
+        await channel.send(embed=embed, view=ApprovalView(submitter_id=self.user_id))
+        await interaction.response.send_message("✅ Shift log submitted!", ephemeral=True)
+
+    @discord.ui.button(label="Denied", style=discord.ButtonStyle.red)
+    async def denied(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ This is not your submission!", ephemeral=True)
+        await interaction.response.send_message("❌ Submission cancelled.", ephemeral=True)
+
+
+# ==== APPROVAL VIEW ====
+class ApprovalView(discord.ui.View):
+    def __init__(self, submitter_id):
         super().__init__(timeout=None)
         self.submitter_id = submitter_id
-        self.start_time = start_time
-        self.end_time = end_time
-        self.payment_amount = payment_amount
-        self.proof_link = proof_link
-        self.submitter_name = submitter_name
 
-    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.green)
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not any(role.id in ALLOWED_APPROVAL_ROLES for role in interaction.user.roles):
-            return await interaction.response.send_message("❌ You don't have permission.", ephemeral=True)
+        if not any(role.id in ALLOWED_ROLE_IDS for role in interaction.user.roles):
+            return await interaction.response.send_message("❌ You don't have permission to approve.", ephemeral=True)
         if interaction.user.id == self.submitter_id:
             return await interaction.response.send_message("❌ You can't approve your own shift.", ephemeral=True)
 
-        # Save to log_shift_system.json
-        log_data = load_json(LOG_SHIFT_FILE)
-        key = f"{self.submitter_name}_{datetime.now().timestamp()}"
-        log_data[key] = {
-            "User": self.submitter_name,
-            "Start": self.start_time,
-            "End": self.end_time,
-            "Payment": self.payment_amount,
-            "Approved_By": str(interaction.user),
-            "Decision_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Proof_Link": self.proof_link
-        }
-        save_json(LOG_SHIFT_FILE, log_data)
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.green()
+        embed.set_footer(text=f"Approved by {interaction.user.display_name} ({interaction.user.id})")
+        await interaction.message.edit(embed=embed, view=None)
+        await interaction.response.send_message("Shift approved!", ephemeral=True)
 
-        # Save to payment_system.json
-        payment_data = load_json(PAYMENT_FILE)
-        payment_data[key] = {
-            "User": self.submitter_name,
-            "Payment": self.payment_amount
-        }
-        save_json(PAYMENT_FILE, payment_data)
+        submitter = interaction.guild.get_member(self.submitter_id)
+        if submitter:
+            try:
+                dm_embed = discord.Embed(
+                    title="✅ Shift Approved",
+                    color=discord.Color.green()
+                )
+                for field in embed.fields:
+                    dm_embed.add_field(name=field.name, value=field.value, inline=field.inline)
+                dm_embed.set_footer(text=f"Approved by {interaction.user.display_name}")
+                await submitter.send(embed=dm_embed)
+            except discord.Forbidden:
+                pass
 
-        # DM submitter
-        try:
-            submitter = await client.fetch_user(self.submitter_id)
-            dm_embed = discord.Embed(title="✅ Shift Approved", color=discord.Color.green())
-            dm_embed.add_field(name="Start Time", value=self.start_time)
-            dm_embed.add_field(name="End Time", value=self.end_time)
-            dm_embed.add_field(name="Payment", value=f"${self.payment_amount}")
-            dm_embed.add_field(name="Approved By", value=str(interaction.user))
-            dm_embed.add_field(name="Proof Link", value=self.proof_link)
-            await submitter.send(embed=dm_embed)
-        except discord.Forbidden:
-            pass
-
-        await interaction.response.send_message("✅ Shift approved and logged.", ephemeral=True)
-
-    @discord.ui.button(label="Deny", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Denied", style=discord.ButtonStyle.red)
     async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not any(role.id in ALLOWED_APPROVAL_ROLES for role in interaction.user.roles):
-            return await interaction.response.send_message("❌ You don't have permission.", ephemeral=True)
+        if not any(role.id in ALLOWED_ROLE_IDS for role in interaction.user.roles):
+            return await interaction.response.send_message("❌ You don't have permission to deny.", ephemeral=True)
         if interaction.user.id == self.submitter_id:
             return await interaction.response.send_message("❌ You can't deny your own shift.", ephemeral=True)
 
-        # DM submitter
-        try:
-            submitter = await client.fetch_user(self.submitter_id)
-            dm_embed = discord.Embed(title="❌ Shift Denied", color=discord.Color.red())
-            dm_embed.add_field(name="Start Time", value=self.start_time)
-            dm_embed.add_field(name="End Time", value=self.end_time)
-            dm_embed.add_field(name="Payment", value=f"${self.payment_amount}")
-            dm_embed.add_field(name="Denied By", value=str(interaction.user))
-            dm_embed.add_field(name="Proof Link", value=self.proof_link)
-            await submitter.send(embed=dm_embed)
-        except discord.Forbidden:
-            pass
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.red()
+        embed.set_footer(text=f"Denied by {interaction.user.display_name} ({interaction.user.id})")
+        await interaction.message.edit(embed=embed, view=None)
+        await interaction.response.send_message("Shift denied!", ephemeral=True)
 
-        await interaction.response.send_message("❌ Shift denied.", ephemeral=True)
+        submitter = interaction.guild.get_member(self.submitter_id)
+        if submitter:
+            try:
+                dm_embed = discord.Embed(
+                    title="❌ Shift Denied",
+                    color=discord.Color.red()
+                )
+                for field in embed.fields:
+                    dm_embed.add_field(name=field.name, value=field.value, inline=field.inline)
+                dm_embed.set_footer(text=f"Denied by {interaction.user.display_name}")
+                await submitter.send(embed=dm_embed)
+            except discord.Forbidden:
+                pass
 
-# ----------------------------
-# SLASH COMMANDS
-# ----------------------------
-@client.tree.command(name="log_shift", description="Submit your shift")
-async def log_shift(interaction: discord.Interaction):
+
+
+
+# ==== SLASH COMMAND ====
+@client.tree.command(name="logshift", description="Log your shift via a form.")
+async def logshift(interaction: discord.Interaction):
     await interaction.response.send_modal(ShiftForm())
-
-@client.tree.command(name="pay_shifts", description="Mark shifts as paid")
-async def pay_shifts(interaction: discord.Interaction):
-    if not any(role.id in ALLOWED_PAYMENT_ROLES for role in interaction.user.roles):
-        return await interaction.response.send_message("❌ You don't have permission.", ephemeral=True)
-
-    payment_data = load_json(PAYMENT_FILE)
-    log_data = load_json(LOG_SHIFT_FILE)
-    if not payment_data:
-        return await interaction.response.send_message("No shifts pending payment.", ephemeral=True)
-
-    view = discord.ui.View()
-    for key, value in payment_data.items():
-        button = discord.ui.Button(label=f"Paid: {value['User']}", style=discord.ButtonStyle.green)
-
-        async def button_callback(interaction: discord.Interaction, key=key):
-            log_data.pop(key, None)
-            payment_data.pop(key, None)
-            save_json(LOG_SHIFT_FILE, log_data)
-            save_json(PAYMENT_FILE, payment_data)
-            await interaction.response.send_message(f"✅ Marked {value['User']} as paid.", ephemeral=True)
-
-        button.callback = button_callback
-        view.add_item(button)
-
-    await interaction.response.send_message("Pending payments:", view=view, ephemeral=True)
-
-# ----------------------------
-# RUN BOT
-# ----------------------------
-TOKEN = os.getenv("DISCORD_TOKEN")  # Token stored on Railway environment
+TOKEN = os.getenv("DISCORD_TOKEN")
 client.run(TOKEN)
-
-
 
 
 
