@@ -1874,6 +1874,12 @@ async def payment_system(interaction: discord.Interaction):
 # ----------------------------
 
 
+
+@client.event
+async def on_ready():
+    await client.tree.sync()
+    print(f"Logged in as {client.user} and command tree synced!")
 client.run(os.environ["DISCORD_TOKEN"])
+
 
 
