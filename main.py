@@ -1706,9 +1706,6 @@ class ShiftForm(discord.ui.Modal, title="Shift Logging Form"):
                 submitter_name=str(interaction.user)
             )
 
-            # Ephemeral response to the user
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
             # Send to approval channel
             approval_channel = client.get_channel(1308221445519966288)  # replace with your channel ID
             if approval_channel:
@@ -1834,6 +1831,7 @@ async def pay_shifts(interaction: discord.Interaction):
 # ----------------------------
 TOKEN = os.getenv("DISCORD_TOKEN")  # Token stored on Railway environment
 client.run(TOKEN)
+
 
 
 
