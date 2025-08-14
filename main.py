@@ -1760,12 +1760,10 @@ class ApprovalButtons(discord.ui.View):
 
 
 @client.tree.command(name="log_shift", description="Submit your shift")
-@app_commands.guilds(guild)
 async def log_shift(interaction: discord.Interaction):
     await interaction.response.send_modal(ShiftForm())
 
 @client.tree.command(name="pay_shifts", description="Mark shifts as paid")
-@app_commands.guilds(guild)
 async def pay_shifts(interaction: discord.Interaction):
     if not any(role.id in ALLOWED_PAYMENT_ROLES for role in interaction.user.roles):
         await interaction.response.send_message("❌ You don't have permission.", ephemeral=True)
@@ -1795,6 +1793,7 @@ async def pay_shifts(interaction: discord.Interaction):
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 client.run(TOKEN)
+
 
 
 
